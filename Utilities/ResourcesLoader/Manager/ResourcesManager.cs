@@ -1,4 +1,3 @@
-#if ADDRESSABLE
 using System;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
@@ -282,4 +281,3 @@ public static class ResourcesManager
         SceneManager.SetActiveScene(scene);
     }
 }
-#endif
