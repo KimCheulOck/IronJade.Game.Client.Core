@@ -1,3 +1,4 @@
+#if ADDRESSABLE
 using System;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
@@ -33,35 +34,35 @@ public static class ResourcesManager
         return instantiate.GetComponent<T>();
     }
 
-    //public static async UniTask<T> InstantiateAsync<T>(string assetPath, Transform parent, Vector3 position = new Vector3(), Quaternion rotation = new Quaternion(), Vector3 scale = new Vector3()) where T : UnityEngine.Object
-    //{
-    //    GameObject builtInPrefab = Resources.Load<GameObject>(assetPath);
+    public static async UniTask<T> InstantiateAsync<T>(string assetPath, Transform parent, Vector3 position = new Vector3(), Quaternion rotation = new Quaternion(), Vector3 scale = new Vector3()) where T : UnityEngine.Object
+    {
+        GameObject builtInPrefab = Resources.Load<GameObject>(assetPath);
 
-    //    if (builtInPrefab != null)
-    //    {
-    //        if (typeof(T) == typeof(GameObject))
-    //            return GameObject.Instantiate(builtInPrefab, position, rotation, parent) as T;
+        if (builtInPrefab != null)
+        {
+            if (typeof(T) == typeof(GameObject))
+                return GameObject.Instantiate(builtInPrefab, position, rotation, parent) as T;
 
-    //        GameObject gameObject = GameObject.Instantiate(builtInPrefab, position, rotation, parent);
-    //        gameObject.transform.localScale = scale;
+            GameObject gameObject = GameObject.Instantiate(builtInPrefab, position, rotation, parent);
+            gameObject.transform.localScale = scale;
 
-    //        return gameObject.GetComponent<T>();
-    //    }
+            return gameObject.GetComponent<T>();
+        }
 
-    //    GameObject loadObject = await LoadAsset<GameObject>(AssetType.Prefab, assetPath);
-    //    if (loadObject == null)
-    //        return null;
+        GameObject loadObject = await LoadAsset<GameObject>(AssetType.Prefab, assetPath);
+        if (loadObject == null)
+            return null;
 
-    //    GameObject instantiate = GameObject.Instantiate(loadObject);
-    //    if (instantiate == null)
-    //        return null;
+        GameObject instantiate = GameObject.Instantiate(loadObject);
+        if (instantiate == null)
+            return null;
 
-    //    instantiate.transform.SetParent(parent);
-    //    instantiate.transform.SetPositionAndRotation(position, rotation);
-    //    instantiate.transform.localScale = scale;
+        instantiate.transform.SetParent(parent);
+        instantiate.transform.SetPositionAndRotation(position, rotation);
+        instantiate.transform.localScale = scale;
 
-    //    return instantiate.GetComponent<T>();
-    //}
+        return instantiate.GetComponent<T>();
+    }
 
     public static async UniTask<T> InstantiateAsync<T>(string assetPath, Transform parent) where T : UnityEngine.Object
     {
@@ -281,3 +282,4 @@ public static class ResourcesManager
         SceneManager.SetActiveScene(scene);
     }
 }
+#endif
