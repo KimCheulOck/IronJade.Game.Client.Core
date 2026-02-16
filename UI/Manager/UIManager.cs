@@ -243,13 +243,7 @@ public class UIManager : MonoBehaviour
             return false;
         }
 
-#if ADDRESSABLE
         BaseView view = await ResourcesManager.InstantiateAsync<BaseView>(path, uiCanvas.transform);
-#else
-        BaseView prefab = Resources.Load<BaseView>(path);
-        BaseView view = GameObject.Instantiate<BaseView>(prefab, uiCanvas.transform);
-#endif
-
         if (view == null)
         {
             // 여길 탄다면 번들 문제거나 진짜 코드 오류인 것
