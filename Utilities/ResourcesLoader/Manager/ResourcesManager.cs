@@ -9,17 +9,49 @@ using UnityEngine.ResourceManagement.AsyncOperations;
 
 public static class ResourcesManager
 {
-    private static Dictionary<string, AsyncOperationHandle> handles = new Dictionary<string, AsyncOperationHandle>();
-    private static HashSet<string> loadingAssets = new HashSet<string>();
-
-    public static void ReleaseAsset(string assetPath)
+    private class BindingHandle
     {
-        if (handles.TryGetValue(assetPath, out var handle) && handle.IsValid())
+        private List<UnityEngine.Object> owners;
+        private AsyncOperationHandle handle;
+
+        public BindingHandle(UnityEngine.Object owner, AsyncOperationHandle handle)
         {
+            this.handle = handle;
+
+            AddOwner(owner);
+        }
+
+        public void AddOwner(UnityEngine.Object owner)
+        {
+            if (owners == null)
+                owners = new List<UnityEngine.Object>();
+
+            owners.Add(owner);
+        }
+
+        public bool Release()
+        {
+            if (!handle.IsValid())
+                return true;
+
+            owners.RemoveAll(match => match.SafeIsNull());
+
+            if (owners.Count > 0)
+                return false;
+
             Addressables.Release(handle);
-            handles.Remove(assetPath);
+            return true;
+        }
+
+        public T Result<T>() where T : UnityEngine.Object
+        {
+            return handle.Result as T;
         }
     }
+
+    private static Dictionary<string, BindingHandle> bindingHandles = new();
+    private static Dictionary<string, Dictionary<string, AsyncOperationHandle>> preloadHandles = new();
+    private static HashSet<string> loadingAssets = new HashSet<string>();
 
     public static T Instantiate<T>(GameObject loadObject, Transform parent) where T : UnityEngine.Object
     {
@@ -49,7 +81,10 @@ public static class ResourcesManager
             return gameObject.GetComponent<T>();
         }
 
-        GameObject loadObject = await LoadAsset<GameObject>(AssetType.Prefab, assetPath);
+        var handle = Addressables.InstantiateAsync(assetPath, position, rotation, parent);
+        await handle;
+
+        GameObject loadObject = handle.Result;
         if (loadObject == null)
             return null;
 
@@ -70,7 +105,9 @@ public static class ResourcesManager
 
         if (builtInPrefab == null)
         {
-            GameObject loadObject = await LoadAsset<GameObject>(AssetType.Prefab, assetPath);
+            var handle = Addressables.InstantiateAsync(assetPath, parent);
+            await handle;
+            GameObject loadObject = handle.Result;
             if (loadObject == null)
                 return null;
 
@@ -89,164 +126,62 @@ public static class ResourcesManager
         return gameObject.GetComponent<T>();
     }
 
-    public static bool TryGetGameObject(string assetPath, out GameObject prefab)
+    public static async UniTask<T> LoadAsset<T>(string assetPath, UnityEngine.Object owner) where T : UnityEngine.Object
     {
-        prefab = null;
-
-        if (!handles.ContainsKey(assetPath))
+        if (bindingHandles.ContainsKey(assetPath))
         {
-            prefab = Resources.Load<GameObject>(assetPath);
-
-            if (prefab == null)
-                return false;
-
-            return true;
+            bindingHandles[assetPath].AddOwner(owner);
+            return bindingHandles[assetPath].Result<T>();
         }
 
-        if (handles[assetPath].Result == null)
-            return false;
-
-        if (handles[assetPath].Result.Equals(null))
-            return false;
-
-        prefab = handles[assetPath].Result as GameObject;
-        if (prefab == null)
-            return false;
-
-        return true;
-    }
-
-    public static bool TryGetComponent<T>(string assetPath, out T component) where T : UnityEngine.Object
-    {
-        component = default;
-
-        if (!handles.ContainsKey(assetPath))
-        {
-            component = Resources.Load<T>(assetPath);
-
-            if (component == null)
-                return false;
-
-            return true;
-        }
-
-        if (handles[assetPath].Result == null)
-            return false;
-
-        if (handles[assetPath].Result.Equals(null))
-            return false;
-
-        component = handles[assetPath].Result as T;
-        if (component == null)
-        {
-            var gameObject = component as GameObject;
-            if (gameObject == null)
-                return false;
-
-            component = gameObject.GetComponent<T>();
-        }
-
-        if (component == null)
-            return false;
-
-        return true;
-    }
-
-    public static void LoadAsset(AssetType assetType, string assetPath)
-    {
-        if (loadingAssets.Contains(assetPath))
-            return;
-
-        loadingAssets.Add(assetPath);
-
-        LoadAsset(assetType, assetPath, onComplete: (success) =>
-        {
-            if (success)
-            {
-                Debug.LogError($"Success to load asset: {assetPath}");
-            }
-            else
-            {
-                Debug.LogError($"Failed to load asset: {assetPath}");
-            }
-
-            loadingAssets.Remove(assetPath);
-        });
-    }
-
-    public static void LoadAsset(AssetType assetType, string assetPath, Action<bool> onComplete)
-    {
-        if (handles.ContainsKey(assetPath))
-        {
-            onComplete(true);
-            return;
-        }
-
-        AsyncOperationHandle handle;
-        switch (assetType)
-        {
-            case AssetType.Prefab:
-                handle = Addressables.LoadAssetAsync<GameObject>(assetPath);
-                break;
-            case AssetType.Sprite:
-                handle = Addressables.LoadAssetAsync<Sprite>(assetPath);
-                break;
-            default:
-                Debug.LogError("Unsupported asset type.");
-                return;
-        }
-
-        handle.Completed += op =>
-        {
-            if (op.Status == AsyncOperationStatus.Succeeded)
-            {
-                handles[assetPath] = op;
-                bool success = op.Status == AsyncOperationStatus.Succeeded;
-                onComplete(success);
-            }
-            else if (op.Status == AsyncOperationStatus.Failed)
-            {
-                loadingAssets.Remove(assetPath);
-                onComplete(false);
-            }
-        };
-
-        handle.WaitForCompletion();
-    }
-
-    public static async UniTask<T> LoadAsset<T>(AssetType assetType, string assetPath) where T : UnityEngine.Object
-    {
-        if (handles.ContainsKey(assetPath))
-            return handles[assetPath].Result as T;
-
-        AsyncOperationHandle handle;
-        switch (assetType)
-        {
-            case AssetType.Prefab:
-                handle = Addressables.LoadAssetAsync<GameObject>(assetPath);
-                break;
-            case AssetType.Sprite:
-                handle = Addressables.LoadAssetAsync<Sprite>(assetPath);
-                break;
-            default:
-                Debug.LogError("Unsupported asset type.");
-                return default;
-        }
+        var handle = Addressables.LoadAssetAsync<T>(assetPath);
 
         await handle;
 
         if (handle.IsValid())
         {
             Debug.LogError($"Success to load asset: {assetPath}");
-
-            handles[assetPath] = handle;
-            return handles[assetPath].Result as T;
+            bindingHandles[assetPath] = new BindingHandle(owner, handle);
+            return bindingHandles[assetPath].Result<T>();
         }
         else
         {
             Debug.LogError($"Failed to load asset: {assetPath}");
             return default;
         }
+    }
+
+    public static void LoadAsset<T>(string assetPath, UnityEngine.Object owner, Action<bool, T> onComplete) where T : UnityEngine.Object
+    {
+        if (bindingHandles.ContainsKey(assetPath))
+        {
+            bindingHandles[assetPath].AddOwner(owner);
+            onComplete(true, bindingHandles[assetPath].Result<T>());
+            return;
+        }
+
+        if (loadingAssets.Contains(assetPath))
+            return;
+
+        loadingAssets.Add(assetPath);
+
+        var handle = Addressables.LoadAssetAsync<GameObject>(assetPath);
+        handle.Completed += op =>
+        {
+            if (op.Status == AsyncOperationStatus.Succeeded)
+            {
+                bindingHandles[assetPath] = new BindingHandle(owner, op);
+                onComplete(true, bindingHandles[assetPath].Result<T>());
+            }
+            else if (op.Status == AsyncOperationStatus.Failed)
+            {
+                onComplete(false, null);
+            }
+
+            loadingAssets.Remove(assetPath);
+        };
+
+        handle.WaitForCompletion();
     }
 
     public static async UniTask<Scene> LoadScene(string scenePath, LoadSceneMode loadSceneMode)
@@ -267,6 +202,56 @@ public static class ResourcesManager
         return SceneManager.GetSceneByName(scenePath);
     }
 
+    public static async UniTask PreloadAssetsWhenAll(string key, string[] assetPaths)
+    {
+        preloadHandles[key] = new Dictionary<string, AsyncOperationHandle>(assetPaths.Length);
+
+        var tasks = new UniTask[assetPaths.Length];
+
+        for (int i = 0; i < assetPaths.Length; ++i)
+        {
+            preloadHandles[key][assetPaths[i]] = Addressables.LoadAssetAsync<UnityEngine.Object>(assetPaths[i]);
+            tasks[i] = preloadHandles[key][assetPaths[i]].ToUniTask();
+        }
+
+        await UniTask.WhenAll(tasks);
+    }
+
+    public static async UniTask PreloadAssets(string key, string[] assetPaths)
+    {
+        preloadHandles[key] = new Dictionary<string, AsyncOperationHandle>(assetPaths.Length);
+
+        var tasks = new UniTask[assetPaths.Length];
+
+        for (int i = 0; i < assetPaths.Length; ++i)
+        {
+            preloadHandles[key][assetPaths[i]] = Addressables.LoadAssetAsync<UnityEngine.Object>(assetPaths[i]);
+            await preloadHandles[key][assetPaths[i]];
+        }
+    }
+
+    public static void ReleaseAsset(string assetPath)
+    {
+        if (bindingHandles.ContainsKey(assetPath))
+        {
+            if (bindingHandles[assetPath].Release())
+                bindingHandles.Remove(assetPath);
+        }
+    }
+
+    public static void ReleasePreloadAsset(string key)
+    {
+        if (!preloadHandles.ContainsKey(key))
+            return;
+
+        foreach (var preloadHandle in preloadHandles[key].Values)
+        {
+            Addressables.Release(preloadHandle);
+        }
+
+        preloadHandles.Remove(key);
+    }
+
     public static async UniTask UnloadScene(string scenePath)
     {
         AsyncOperation load = SceneManager.UnloadSceneAsync(scenePath);
@@ -280,6 +265,32 @@ public static class ResourcesManager
     public static void ActiveScene(Scene scene)
     {
         SceneManager.SetActiveScene(scene);
+    }
+
+    public static bool TryGetAsset<T>(string assetPath, UnityEngine.Object owner, out T asset) where T : UnityEngine.Object
+    {
+        asset = null;
+
+        if (!bindingHandles.ContainsKey(assetPath))
+            return false;
+
+        asset = bindingHandles[assetPath].Result<T>();
+        return true;
+    }
+
+    public static bool TryGetPreloadAsset<T>(string assetPath, out T asset) where T : UnityEngine.Object
+    {
+        asset = null;
+
+        foreach (var preloadHandle in preloadHandles.Values)
+        {
+            if (!preloadHandle.ContainsKey(assetPath))
+                continue;
+
+            asset = preloadHandle[assetPath].Result as T;
+        }
+
+        return asset != null;
     }
 }
 #endif
