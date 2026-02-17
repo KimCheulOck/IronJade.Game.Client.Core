@@ -81,6 +81,11 @@ public static class ResourcesManager
             return gameObject.GetComponent<T>();
         }
 
+#if UNITY_EDITOR
+        if (UseAssetDatabase())
+            return null;
+#endif
+
         var handle = Addressables.InstantiateAsync(assetPath, position, rotation, parent);
         await handle;
 
@@ -107,11 +112,7 @@ public static class ResourcesManager
         {
             var handle = Addressables.InstantiateAsync(assetPath, parent);
             await handle;
-            GameObject loadObject = handle.Result;
-            if (loadObject == null)
-                return null;
-
-            GameObject instantiate = GameObject.Instantiate(loadObject, parent);
+            GameObject instantiate = handle.Result;
             if (instantiate == null)
                 return null;
 
@@ -128,6 +129,17 @@ public static class ResourcesManager
 
     public static async UniTask<T> LoadAsset<T>(string assetPath, UnityEngine.Object owner) where T : UnityEngine.Object
     {
+#if UNITY_EDITOR
+        if (UseAssetDatabase())
+        {
+            var asset = Resources.Load<T>(assetPath);
+            if (asset == null)
+                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
+
+            return asset;
+        }
+#endif
+
         if (bindingHandles.ContainsKey(assetPath))
         {
             bindingHandles[assetPath].AddOwner(owner);
@@ -153,6 +165,18 @@ public static class ResourcesManager
 
     public static void LoadAsset<T>(string assetPath, UnityEngine.Object owner, Action<bool, T> onComplete) where T : UnityEngine.Object
     {
+#if UNITY_EDITOR
+        if (UseAssetDatabase())
+        {
+            var asset = Resources.Load<T>(assetPath);
+            if (asset == null)
+                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
+
+            onComplete(asset != null, asset);
+            return;
+        }
+#endif
+
         if (bindingHandles.ContainsKey(assetPath))
         {
             bindingHandles[assetPath].AddOwner(owner);
@@ -165,7 +189,7 @@ public static class ResourcesManager
 
         loadingAssets.Add(assetPath);
 
-        var handle = Addressables.LoadAssetAsync<GameObject>(assetPath);
+        var handle = Addressables.LoadAssetAsync<T>(assetPath);
         handle.Completed += op =>
         {
             if (op.Status == AsyncOperationStatus.Succeeded)
@@ -204,14 +228,22 @@ public static class ResourcesManager
 
     public static async UniTask PreloadAssetsWhenAll(string key, string[] assetPaths)
     {
-        preloadHandles[key] = new Dictionary<string, AsyncOperationHandle>(assetPaths.Length);
+#if UNITY_EDITOR
+        if (UseAssetDatabase())
+            return;
+#endif
 
-        var tasks = new UniTask[assetPaths.Length];
+        if (!preloadHandles.ContainsKey(key))
+            preloadHandles[key] = new Dictionary<string, AsyncOperationHandle>(assetPaths.Length);
 
+        var tasks = new List<UniTask>(assetPaths.Length);
         for (int i = 0; i < assetPaths.Length; ++i)
         {
+            if (preloadHandles[key].ContainsKey(assetPaths[i]))
+                continue;
+
             preloadHandles[key][assetPaths[i]] = Addressables.LoadAssetAsync<UnityEngine.Object>(assetPaths[i]);
-            tasks[i] = preloadHandles[key][assetPaths[i]].ToUniTask();
+            tasks.Add(preloadHandles[key][assetPaths[i]].ToUniTask());
         }
 
         await UniTask.WhenAll(tasks);
@@ -219,6 +251,11 @@ public static class ResourcesManager
 
     public static async UniTask PreloadAssets(string key, string[] assetPaths)
     {
+#if UNITY_EDITOR
+        if (UseAssetDatabase())
+            return;
+#endif
+
         preloadHandles[key] = new Dictionary<string, AsyncOperationHandle>(assetPaths.Length);
 
         var tasks = new UniTask[assetPaths.Length];
@@ -269,6 +306,17 @@ public static class ResourcesManager
 
     public static bool TryGetAsset<T>(string assetPath, UnityEngine.Object owner, out T asset) where T : UnityEngine.Object
     {
+#if UNITY_EDITOR
+        if (UseAssetDatabase())
+        {
+            asset = Resources.Load<T>(assetPath);
+            if (asset == null)
+                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
+
+            return true;
+        }
+#endif
+
         asset = null;
 
         if (!bindingHandles.ContainsKey(assetPath))
@@ -280,6 +328,17 @@ public static class ResourcesManager
 
     public static bool TryGetPreloadAsset<T>(string assetPath, out T asset) where T : UnityEngine.Object
     {
+#if UNITY_EDITOR
+        if (UseAssetDatabase())
+        {
+            asset = Resources.Load<T>(assetPath);
+            if (asset == null)
+                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
+
+            return true;
+        }
+#endif
+
         asset = null;
 
         foreach (var preloadHandle in preloadHandles.Values)
@@ -292,5 +351,19 @@ public static class ResourcesManager
 
         return asset != null;
     }
+
+#if UNITY_EDITOR
+    private static bool UseAssetDatabase()
+    {
+        var settings = UnityEditor.AddressableAssets.AddressableAssetSettingsDefaultObject.Settings;
+        if (settings == null)
+            return true;
+
+        if (settings.ActivePlayModeDataBuilderIndex == 0)
+            return true;
+
+        return false;
+    }
+#endif
 }
 #endif
