@@ -63,6 +63,9 @@ public static class ResourcesManager
         instantiate.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
         instantiate.transform.localScale = Vector3.one;
 
+        if (typeof(T) == typeof(GameObject))
+            return instantiate as T;
+
         return instantiate.GetComponent<T>();
     }
 
