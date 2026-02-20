@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.IO;
-using UnityEditor;
 using UnityEngine;
 
 #if UNITY_EDITOR
@@ -91,9 +90,10 @@ namespace IronJade.UI.Core
 
             for (int i = 0; i < nameByPath.Length; ++i)
             {
+                var view = prefabsWithComponent[i].GetComponent<BaseView>();
                 nameByPath[i] = new NameByPath
                 {
-                    Name = prefabsWithComponent[i].name
+                    Name = view.GetType().Name
                 };
                 nameByPath[i].Name = nameByPath[i].Name.Replace("View", "Controller");
                 nameByPath[i].Name = nameByPath[i].Name.Replace("Popup", "Controller");

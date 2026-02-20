@@ -93,6 +93,9 @@ public class UIManager : MonoBehaviour
     /// <param name="onSettingModel">셋팅할 모델이 있을 때 처리</param>
     public async UniTask EnterAsync<T, TT>(System.Action<T, TT> onSettingModel = null) where T : BaseController where TT : BaseModel, new()
     {
+        if (CheckOpend<T>())
+            return;
+
         await LoadAsync<T, TT>(onSettingModel);
         await OnChanged<T, TT>();
     }

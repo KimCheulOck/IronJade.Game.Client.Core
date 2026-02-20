@@ -109,7 +109,20 @@ public static class ResourcesManager
 
     public static async UniTask<T> InstantiateAsync<T>(string assetPath, Transform parent) where T : UnityEngine.Object
     {
-        GameObject builtInPrefab = Resources.Load<GameObject>(assetPath);
+#if UNITY_EDITOR
+        if (UseAssetDatabase())
+        {
+            var asset = Resources.Load<T>(assetPath);
+            if (asset == null)
+                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
+
+            if (asset == null)
+                return null;
+
+            return GameObject.Instantiate(asset, parent);
+        }
+#endif
+        T builtInPrefab = Resources.Load<T>(assetPath);
 
         if (builtInPrefab == null)
         {
@@ -123,11 +136,11 @@ public static class ResourcesManager
         }
 
         if (typeof(T) == typeof(GameObject))
-            return GameObject.Instantiate(builtInPrefab, parent) as T;
+            return GameObject.Instantiate(builtInPrefab, parent);
 
-        GameObject gameObject = GameObject.Instantiate(builtInPrefab, parent);
+        T gameObject = GameObject.Instantiate(builtInPrefab, parent);
 
-        return gameObject.GetComponent<T>();
+        return gameObject;
     }
 
     public static async UniTask<T> LoadAsset<T>(string assetPath, UnityEngine.Object owner) where T : UnityEngine.Object
