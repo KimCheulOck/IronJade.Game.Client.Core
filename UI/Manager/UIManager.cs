@@ -200,6 +200,14 @@ public class UIManager : MonoBehaviour
     }
 
     /// <summary>
+    /// UI 하나라도 오픈여부 판단
+    /// </summary>
+    public bool CheckOpend()
+    {
+        return stack.Count > 0;
+    }
+
+    /// <summary>
     /// 찾고자 하는 타입에 해당하는 스택 정보를 얻는다.
     /// </summary>
     private BaseController GetStackController<T>() where T : BaseController
