@@ -59,9 +59,13 @@ public static class ResourcesManager
         if (instantiate == null)
             return null;
 
-        instantiate.transform.SetParent(parent);
-        instantiate.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
-        instantiate.transform.localScale = Vector3.one;
+        if (parent != null)
+        {
+            instantiate.transform.SetParent(parent);
+            instantiate.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            instantiate.transform.localScale = Vector3.one;
+            instantiate.ChangeLayer(LayerMask.LayerToName(parent.gameObject.layer), true);
+        }
 
         if (typeof(T) == typeof(GameObject))
             return instantiate as T;
@@ -71,40 +75,51 @@ public static class ResourcesManager
 
     public static async UniTask<T> InstantiateAsync<T>(string assetPath, Transform parent, Vector3 position = new Vector3(), Quaternion rotation = new Quaternion(), Vector3 scale = new Vector3()) where T : UnityEngine.Object
     {
-        GameObject builtInPrefab = Resources.Load<GameObject>(assetPath);
-
-        if (builtInPrefab != null)
-        {
-            if (typeof(T) == typeof(GameObject))
-                return GameObject.Instantiate(builtInPrefab, position, rotation, parent) as T;
-
-            GameObject gameObject = GameObject.Instantiate(builtInPrefab, position, rotation, parent);
-            gameObject.transform.localScale = scale;
-
-            return gameObject.GetComponent<T>();
-        }
-
 #if UNITY_EDITOR
         if (UseAssetDatabase())
-            return null;
+        {
+            var asset = Resources.Load<T>(assetPath);
+            if (asset == null)
+                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
+
+            if (asset == null)
+                return null;
+
+            return GameObject.Instantiate(asset, parent);
+        }
 #endif
 
-        var handle = Addressables.InstantiateAsync(assetPath, position, rotation, parent);
-        await handle;
+        T builtInPrefab = Resources.Load<T>(assetPath);
 
-        GameObject loadObject = handle.Result;
-        if (loadObject == null)
-            return null;
+        if (builtInPrefab == null)
+        {
+            var handle = Addressables.InstantiateAsync(assetPath, position, rotation, parent);
+            await handle;
 
-        GameObject instantiate = GameObject.Instantiate(loadObject);
-        if (instantiate == null)
-            return null;
+            GameObject instantiate = handle.Result;
+            if (instantiate == null)
+                return null;
 
-        instantiate.transform.SetParent(parent);
-        instantiate.transform.SetPositionAndRotation(position, rotation);
-        instantiate.transform.localScale = scale;
+            bindingHandles[assetPath] = new BindingHandle(instantiate, handle);
 
-        return instantiate.GetComponent<T>();
+            instantiate.transform.SetParent(parent);
+            instantiate.transform.SetPositionAndRotation(position, rotation);
+            instantiate.transform.localScale = scale;
+
+            return instantiate.GetComponent<T>();
+        }
+
+        T t = GameObject.Instantiate(builtInPrefab, parent);
+
+        if (typeof(T) == typeof(GameObject))
+        {
+            GameObject instantiate = t as GameObject;
+            instantiate.transform.SetParent(parent);
+            instantiate.transform.SetPositionAndRotation(position, rotation);
+            instantiate.transform.localScale = scale;
+        }
+
+        return t;
     }
 
     public static async UniTask<T> InstantiateAsync<T>(string assetPath, Transform parent) where T : UnityEngine.Object
@@ -131,6 +146,8 @@ public static class ResourcesManager
             GameObject instantiate = handle.Result;
             if (instantiate == null)
                 return null;
+
+            bindingHandles[assetPath] = new BindingHandle(instantiate, handle);
 
             return instantiate.GetComponent<T>();
         }
