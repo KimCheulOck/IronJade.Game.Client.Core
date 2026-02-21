@@ -5,8 +5,9 @@ using UnityEngine;
 /// - Enable 시 즉시 업데이트 옵션
 /// - 부드럽게(Smooth) / 즉각(Instant) 모드
 /// - World / Local 좌표 모드
+/// 렌더 직전(onBeforeRender)에 동기화하여 CinemachineBrain이 카메라를 옮긴 뒤 같은 프레임에 따라감.
 /// </summary>
-public class FollowTarget : MonoBehaviour
+public class FollowBeforeRenderTarget : MonoBehaviour
 {
     public enum FollowMode
     {
@@ -56,22 +57,27 @@ public class FollowTarget : MonoBehaviour
 
     private void OnEnable()
     {
-        if (updateImmediatelyOnEnable)
+        Application.onBeforeRender += OnBeforeRender;
+        if (updateImmediatelyOnEnable && target != null)
             ApplyToTargetInstant();
     }
 
-    private void LateUpdate()
+    private void OnDisable()
+    {
+        Application.onBeforeRender -= OnBeforeRender;
+    }
+
+    /// <summary>
+    /// 렌더 직전 호출 — CinemachineBrain 등이 카메라를 갱신한 뒤이므로 같은 프레임에 맞춤.
+    /// </summary>
+    private void OnBeforeRender()
     {
         if (target == null) return;
 
         if (followMode == FollowMode.Instant)
-        {
             ApplyToTargetInstant();
-        }
         else
-        {
             ApplyToTargetSmooth();
-        }
     }
 
     /// <summary>
