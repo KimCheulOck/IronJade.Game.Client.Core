@@ -42,6 +42,14 @@ namespace IronJade.UI.Core
         }
 
         /// <summary>
+        /// 뒤로가기 시
+        /// </summary>
+        public virtual async UniTask<bool> OnBackProcess()
+        {
+            return true;
+        }
+
+        /// <summary>
         /// 매 프레임마다 UIManager를 통해서 업데이트
         /// Stack 순서에 따라 호출됨
         /// </summary>
@@ -86,6 +94,7 @@ namespace IronJade.UI.Core
         {
             this.view = view;
             this.view.SetModel(model);
+            this.view.SetEvent(OnBackProcess, OnExitProcess);
         }
 
         /// <summary>

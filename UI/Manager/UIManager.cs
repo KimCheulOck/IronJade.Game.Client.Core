@@ -12,6 +12,8 @@ public class UIManager : MonoBehaviour
 
     [SerializeField]
     private Canvas uiCanvas = null;
+    [SerializeField]
+    private GameObject loadingUI = null;
 
     // UI 스택
     private List<BaseController> stack = new List<BaseController>(10);
@@ -24,9 +26,25 @@ public class UIManager : MonoBehaviour
     }
 
     /// <summary>
+    /// 로딩 UI 켜기
+    /// </summary>
+    public void ShowLoadingUI()
+    {
+        loadingUI.SafeSetActive(true);
+    }
+
+    /// <summary>
+    /// 로딩 UI 끄기
+    /// </summary>
+    public void HideLoadingUI()
+    {
+        loadingUI.SafeSetActive(false);
+    }
+
+    /// <summary>
     /// UI를 로드한다.
     /// </summary>
-    public async UniTask LoadAsync<T, TT>(System.Action<T, TT> onSettingModel = null) where T : BaseController where TT : BaseModel, new()
+    public async UniTask<bool> LoadAsync<T, TT>(System.Action<T, TT> onSettingModel = null) where T : BaseController where TT : BaseModel, new()
     {
         BaseController controller = GetController<T>();
         controller.SetModel<TT>();
@@ -39,19 +57,18 @@ public class UIManager : MonoBehaviour
         // - 네트워크 호출 후 재시도가 아닌 뒤로 되돌아가야 하는 경우
         // (아레나 같이 진입 시간이 있거나 하면 재시도가 아닌 뒤로 보내야 하기 때문)
         if (!isLoading)
-        {
-            return;
-        }
+            return false;
 
         // 프리팹을 생성한다.
         if (!await CreatePrefab(controller))
-            return;
+            return false;
 
         // 스택에 쌓는다.
         stack.Add(controller);
 
         // 가장 최상위 뎁스로
         controller.SetSiblingIndex(uiCanvas.transform.childCount);
+        return true;
     }
 
     /// <summary>
@@ -93,11 +110,22 @@ public class UIManager : MonoBehaviour
     /// <param name="onSettingModel">셋팅할 모델이 있을 때 처리</param>
     public async UniTask EnterAsync<T, TT>(System.Action<T, TT> onSettingModel = null) where T : BaseController where TT : BaseModel, new()
     {
-        if (CheckOpend<T>())
-            return;
+        ShowLoadingUI();
 
-        await LoadAsync<T, TT>(onSettingModel);
+        if (CheckOpend<T>())
+        {
+            HideLoadingUI();
+            return;
+        }
+
+        if (!await LoadAsync<T, TT>(onSettingModel))
+        {
+            HideLoadingUI();
+            return;
+        }
+
         await OnChanged<T, TT>();
+        HideLoadingUI();
     }
 
     /// <summary>
@@ -153,7 +181,22 @@ public class UIManager : MonoBehaviour
         if (index < 0)
             return false;
 
-        return await ExitAsync(stack[index]);
+        var controller = stack[index];
+        if (controller == null)
+        {
+            // 없는 UI를 끄려고 했다.
+            // 이건 로직 상에 문제가 있다는 의미
+            IronJade.Debug.LogError("여기 오면 문제!! UI Stack이 뭔가 꼬였다.");
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPaused = true;
+#endif
+            return false;
+        }
+
+        if (!await controller.OnBackProcess())
+            return false;
+
+        return await ExitAsync(controller);
     }
 
     /// <summary>

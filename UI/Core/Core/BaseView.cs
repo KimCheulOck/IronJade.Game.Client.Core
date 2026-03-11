@@ -12,6 +12,8 @@ namespace IronJade.UI.Core
     public abstract class BaseView : MonoBehaviour
     {
         protected BaseModel model { get; private set; }
+        protected System.Func<UniTask<bool>> OnEventBack { get; private set; }
+        protected System.Func<UniTask<bool>> OnEventExit { get; private set; }
 
         /// <summary>
         /// UIManager 외에는 호출하지 마세요!
@@ -19,6 +21,12 @@ namespace IronJade.UI.Core
         public void SetModel(BaseModel model)
         {
             this.model = model;
+        }
+
+        public void SetEvent(System.Func<UniTask<bool>> onEventBack, System.Func<UniTask<bool>> onEventExit)
+        {
+            OnEventBack = onEventBack;
+            OnEventExit = onEventExit;
         }
 
         /// <summary>
@@ -43,6 +51,16 @@ namespace IronJade.UI.Core
         /// </summary>
         public virtual void OnUpdate()
         {
+        }
+
+        public virtual void OnClickExit()
+        {
+            OnEventExit();
+        }
+
+        public virtual void OnClickBack()
+        {
+            OnEventBack();
         }
     }
 }
