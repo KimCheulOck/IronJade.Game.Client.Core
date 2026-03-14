@@ -26,7 +26,7 @@ public static class ResourcesManager
 #if ADDRESSABLE
     private class BindingHandle
     {
-        private List<UnityEngine.Object> owners;
+        private HashSet<UnityEngine.Object> owners;
         private AsyncOperationHandle handle;
 
         public BindingHandle(UnityEngine.Object owner, AsyncOperationHandle handle)
@@ -39,7 +39,7 @@ public static class ResourcesManager
         public void AddOwner(UnityEngine.Object owner)
         {
             if (owners == null)
-                owners = new List<UnityEngine.Object>();
+                owners = new HashSet<UnityEngine.Object>();
 
             owners.Add(owner);
         }
@@ -49,13 +49,18 @@ public static class ResourcesManager
             if (!handle.IsValid())
                 return true;
 
-            owners.RemoveAll(match => match.SafeIsNull());
+            owners.RemoveWhere(match => match.SafeIsNull());
 
             if (owners.Count > 0)
                 return false;
 
             Addressables.Release(handle);
             return true;
+        }
+
+        public bool CheckOwner(UnityEngine.Object owner)
+        {
+            return owners.Contains(owner);
         }
 
         public T Result<T>() where T : UnityEngine.Object
@@ -67,6 +72,24 @@ public static class ResourcesManager
     private static Dictionary<string, BindingHandle> bindingHandles = new();
     private static Dictionary<string, Dictionary<string, AsyncOperationHandle>> preloadHandles = new();
     private static HashSet<string> loadingAssets = new HashSet<string>();
+
+    public static bool TryGetAsset<T>(string assetPath, UnityEngine.Object owner, out T asset) where T : UnityEngine.Object
+    {
+#if UNITY_EDITOR
+        if (TryEditorLoad<T>(assetPath, out asset))
+            return true;
+#endif
+        asset = null;
+
+        if (!bindingHandles.ContainsKey(assetPath))
+            return false;
+
+        if (!bindingHandles[assetPath].CheckOwner(owner))
+            return false;
+
+        asset = bindingHandles[assetPath].Result<T>();
+        return true;
+    }
 
     public static bool TryGetAsset<T>(string assetPath, out T asset) where T : UnityEngine.Object
     {
@@ -342,7 +365,7 @@ public static class ResourcesManager
         return false;
     }
 #endif
-    public static async UniTask<T> InstantiateAsync<T>(GameObject loadObject, Transform parent) where T : UnityEngine.Object
+    public static T Instantiate<T>(GameObject loadObject, Transform parent) where T : UnityEngine.Object
     {
         GameObject instantiate = GameObject.Instantiate(loadObject);
         if (instantiate == null)
