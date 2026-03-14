@@ -1,14 +1,29 @@
-#if ADDRESSABLE
 using System;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+
+#if ADDRESSABLE
 using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
+#endif
 
 public static class ResourcesManager
 {
+    private static GameObject PublicOwner
+    {
+        get
+        {
+            if (publicOwner == null)
+                publicOwner = new GameObject("PublicOwner");
+
+            return publicOwner;
+        }
+    }
+    private static GameObject publicOwner;
+
+#if ADDRESSABLE
     private class BindingHandle
     {
         private List<UnityEngine.Object> owners;
@@ -53,125 +68,114 @@ public static class ResourcesManager
     private static Dictionary<string, Dictionary<string, AsyncOperationHandle>> preloadHandles = new();
     private static HashSet<string> loadingAssets = new HashSet<string>();
 
-    public static T Instantiate<T>(GameObject loadObject, Transform parent) where T : UnityEngine.Object
+    public static bool TryGetAsset<T>(string assetPath, out T asset) where T : UnityEngine.Object
     {
-        GameObject instantiate = GameObject.Instantiate(loadObject);
-        if (instantiate == null)
-            return null;
+#if UNITY_EDITOR
+        if (TryEditorLoad<T>(assetPath, out asset))
+            return true;
+#endif
+        asset = null;
 
-        if (parent != null)
+        if (!bindingHandles.ContainsKey(assetPath))
+            return false;
+
+        asset = bindingHandles[assetPath].Result<T>();
+        return true;
+    }
+
+    public static bool TryGetPreloadAsset<T>(string assetPath, out T asset) where T : UnityEngine.Object
+    {
+#if UNITY_EDITOR
+        if (TryEditorLoad<T>(assetPath, out asset))
+            return true;
+#endif
+        asset = null;
+
+        foreach (var preloadHandle in preloadHandles.Values)
         {
-            instantiate.transform.SetParent(parent);
-            instantiate.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
-            instantiate.transform.localScale = Vector3.one;
-            instantiate.ChangeLayer(LayerMask.LayerToName(parent.gameObject.layer), true);
+            if (!preloadHandle.ContainsKey(assetPath))
+                continue;
+
+            asset = preloadHandle[assetPath].Result as T;
         }
 
-        if (typeof(T) == typeof(GameObject))
-            return instantiate as T;
+        return asset != null;
+    }
 
-        return instantiate.GetComponent<T>();
+    public static async UniTask PreloadAssetsWhenAll(string key, string[] assetPaths)
+    {
+        if (UseAssetDatabase())
+            return;
+
+        if (!preloadHandles.ContainsKey(key))
+            preloadHandles[key] = new Dictionary<string, AsyncOperationHandle>(assetPaths.Length);
+
+        var tasks = new List<UniTask>(assetPaths.Length);
+        for (int i = 0; i < assetPaths.Length; ++i)
+        {
+            if (preloadHandles[key].ContainsKey(assetPaths[i]))
+                continue;
+
+            preloadHandles[key][assetPaths[i]] = Addressables.LoadAssetAsync<UnityEngine.Object>(assetPaths[i]);
+            tasks.Add(preloadHandles[key][assetPaths[i]].ToUniTask());
+        }
+
+        await UniTask.WhenAll(tasks);
+    }
+
+    public static async UniTask PreloadAssets(string key, string[] assetPaths)
+    {
+        if (UseAssetDatabase())
+            return;
+
+        preloadHandles[key] = new Dictionary<string, AsyncOperationHandle>(assetPaths.Length);
+
+        var tasks = new UniTask[assetPaths.Length];
+
+        for (int i = 0; i < assetPaths.Length; ++i)
+        {
+            preloadHandles[key][assetPaths[i]] = Addressables.LoadAssetAsync<UnityEngine.Object>(assetPaths[i]);
+            await preloadHandles[key][assetPaths[i]];
+        }
     }
 
     public static async UniTask<T> InstantiateAsync<T>(string assetPath, Transform parent, Vector3 position = new Vector3(), Quaternion rotation = new Quaternion(), Vector3 scale = new Vector3()) where T : UnityEngine.Object
     {
 #if UNITY_EDITOR
-        if (UseAssetDatabase())
-        {
-            var asset = Resources.Load<T>(assetPath);
-            if (asset == null)
-                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
-
-            if (asset == null)
-                return null;
-
-            return GameObject.Instantiate(asset, parent);
-        }
+        if (TryEditorInstantiate<T>(assetPath, parent, position, rotation, scale, out T obj))
+            return obj;
 #endif
 
-        T builtInPrefab = Resources.Load<T>(assetPath);
+        var handle = Addressables.InstantiateAsync(assetPath, position, rotation, parent);
+        await handle;
 
-        if (builtInPrefab == null)
+        GameObject instantiate = handle.Result;
+        if (instantiate == null)
         {
-            var handle = Addressables.InstantiateAsync(assetPath, position, rotation, parent);
-            await handle;
-
-            GameObject instantiate = handle.Result;
+            instantiate = Resources.Load<GameObject>(assetPath);
             if (instantiate == null)
                 return null;
-
+        }
+        else
+        {
             bindingHandles[assetPath] = new BindingHandle(instantiate, handle);
-
-            instantiate.transform.SetParent(parent);
-            instantiate.transform.SetPositionAndRotation(position, rotation);
-            instantiate.transform.localScale = scale;
-
-            return instantiate.GetComponent<T>();
         }
 
-        T t = GameObject.Instantiate(builtInPrefab, parent);
+        instantiate.transform.SetParent(parent);
+        instantiate.transform.SetPositionAndRotation(position, rotation);
+        instantiate.transform.localScale = scale;
 
-        if (typeof(T) == typeof(GameObject))
-        {
-            GameObject instantiate = t as GameObject;
-            instantiate.transform.SetParent(parent);
-            instantiate.transform.SetPositionAndRotation(position, rotation);
-            instantiate.transform.localScale = scale;
-        }
-
-        return t;
-    }
-
-    public static async UniTask<T> InstantiateAsync<T>(string assetPath, Transform parent) where T : UnityEngine.Object
-    {
-#if UNITY_EDITOR
-        if (UseAssetDatabase())
-        {
-            var asset = Resources.Load<T>(assetPath);
-            if (asset == null)
-                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
-
-            if (asset == null)
-                return null;
-
-            return GameObject.Instantiate(asset, parent);
-        }
-#endif
-        T builtInPrefab = Resources.Load<T>(assetPath);
-
-        if (builtInPrefab == null)
-        {
-            var handle = Addressables.InstantiateAsync(assetPath, parent);
-            await handle;
-            GameObject instantiate = handle.Result;
-            if (instantiate == null)
-                return null;
-
-            bindingHandles[assetPath] = new BindingHandle(instantiate, handle);
-
-            return instantiate.GetComponent<T>();
-        }
-
-        if (typeof(T) == typeof(GameObject))
-            return GameObject.Instantiate(builtInPrefab, parent);
-
-        T gameObject = GameObject.Instantiate(builtInPrefab, parent);
-
-        return gameObject;
+        return instantiate.GetComponent<T>();
     }
 
     public static async UniTask<T> LoadAsset<T>(string assetPath, UnityEngine.Object owner) where T : UnityEngine.Object
     {
 #if UNITY_EDITOR
-        if (UseAssetDatabase())
-        {
-            var asset = Resources.Load<T>(assetPath);
-            if (asset == null)
-                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
-
-            return asset;
-        }
+        if (TryEditorLoad(assetPath, out T obj))
+            return obj;
 #endif
+        if (owner == null)
+            owner = PublicOwner;
 
         if (bindingHandles.ContainsKey(assetPath))
         {
@@ -192,23 +196,19 @@ public static class ResourcesManager
         else
         {
             Debug.LogError($"Failed to load asset: {assetPath}");
-            return default;
+            return Resources.Load<T>(assetPath);
         }
     }
 
     public static void LoadAsset<T>(string assetPath, UnityEngine.Object owner, Action<bool, T> onComplete) where T : UnityEngine.Object
     {
 #if UNITY_EDITOR
-        if (UseAssetDatabase())
-        {
-            var asset = Resources.Load<T>(assetPath);
-            if (asset == null)
-                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
-
-            onComplete(asset != null, asset);
-            return;
-        }
+        if (TryEditorLoad(assetPath, out T obj))
+            onComplete(obj != null, obj);
 #endif
+
+        if (owner == null)
+            owner = PublicOwner;
 
         if (bindingHandles.ContainsKey(assetPath))
         {
@@ -232,7 +232,8 @@ public static class ResourcesManager
             }
             else if (op.Status == AsyncOperationStatus.Failed)
             {
-                onComplete(false, null);
+                var asset = Resources.Load<T>(assetPath);
+                onComplete(asset != null, asset);
             }
 
             loadingAssets.Remove(assetPath);
@@ -259,47 +260,6 @@ public static class ResourcesManager
         return SceneManager.GetSceneByName(scenePath);
     }
 
-    public static async UniTask PreloadAssetsWhenAll(string key, string[] assetPaths)
-    {
-#if UNITY_EDITOR
-        if (UseAssetDatabase())
-            return;
-#endif
-
-        if (!preloadHandles.ContainsKey(key))
-            preloadHandles[key] = new Dictionary<string, AsyncOperationHandle>(assetPaths.Length);
-
-        var tasks = new List<UniTask>(assetPaths.Length);
-        for (int i = 0; i < assetPaths.Length; ++i)
-        {
-            if (preloadHandles[key].ContainsKey(assetPaths[i]))
-                continue;
-
-            preloadHandles[key][assetPaths[i]] = Addressables.LoadAssetAsync<UnityEngine.Object>(assetPaths[i]);
-            tasks.Add(preloadHandles[key][assetPaths[i]].ToUniTask());
-        }
-
-        await UniTask.WhenAll(tasks);
-    }
-
-    public static async UniTask PreloadAssets(string key, string[] assetPaths)
-    {
-#if UNITY_EDITOR
-        if (UseAssetDatabase())
-            return;
-#endif
-
-        preloadHandles[key] = new Dictionary<string, AsyncOperationHandle>(assetPaths.Length);
-
-        var tasks = new UniTask[assetPaths.Length];
-
-        for (int i = 0; i < assetPaths.Length; ++i)
-        {
-            preloadHandles[key][assetPaths[i]] = Addressables.LoadAssetAsync<UnityEngine.Object>(assetPaths[i]);
-            await preloadHandles[key][assetPaths[i]];
-        }
-    }
-
     public static void ReleaseAsset(string assetPath)
     {
         if (bindingHandles.ContainsKey(assetPath))
@@ -322,6 +282,86 @@ public static class ResourcesManager
         preloadHandles.Remove(key);
     }
 
+    private static bool UseAssetDatabase()
+    {
+#if UNITY_EDITOR
+        var settings = UnityEditor.AddressableAssets.AddressableAssetSettingsDefaultObject.Settings;
+        if (settings == null)
+            return true;
+
+        if (settings.ActivePlayModeDataBuilderIndex == 0)
+            return true;
+#endif
+        return false;
+    }
+#else
+    public static async UniTask<T> InstantiateAsync<T>(string assetPath, Transform parent, Vector3 position = new Vector3(), Quaternion rotation = new Quaternion(), Vector3 scale = new Vector3()) where T : UnityEngine.Object
+    {
+#if UNITY_EDITOR
+        if (TryEditorInstantiate<T>(assetPath, parent, position, rotation, scale, out T obj))
+            return obj;
+#endif
+
+        T builtInPrefab = Resources.Load<T>(assetPath);
+        if (builtInPrefab == null)
+            return null;
+
+        return GameObject.Instantiate(builtInPrefab, parent);
+    }
+
+    public static async UniTask<T> LoadAsset<T>(string assetPath, UnityEngine.Object owner) where T : UnityEngine.Object
+    {
+#if UNITY_EDITOR
+        if (TryEditorLoad(assetPath, out T obj))
+            return obj;
+#endif
+        return Resources.Load<T>(assetPath);
+    }
+
+    public static void LoadAsset<T>(string assetPath, UnityEngine.Object owner, Action<bool, T> onComplete) where T : UnityEngine.Object
+    {
+#if UNITY_EDITOR
+        if (TryEditorLoad(assetPath, out T obj))
+            onComplete(obj != null, obj);
+#endif
+        var asset = Resources.Load<T>(assetPath);
+        onComplete(asset != null, asset);
+    }
+
+    public static async UniTask<Scene> LoadScene(string scenePath, LoadSceneMode loadSceneMode)
+    {
+        AsyncOperation load = SceneManager.LoadSceneAsync(scenePath, loadSceneMode);
+
+        await load.ToUniTask();
+
+        return SceneManager.GetSceneByName(scenePath);
+    }
+
+    private static bool UseAssetDatabase()
+    {
+        return false;
+    }
+#endif
+    public static async UniTask<T> InstantiateAsync<T>(GameObject loadObject, Transform parent) where T : UnityEngine.Object
+    {
+        GameObject instantiate = GameObject.Instantiate(loadObject);
+        if (instantiate == null)
+            return null;
+
+        if (parent != null)
+        {
+            instantiate.transform.SetParent(parent);
+            instantiate.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            instantiate.transform.localScale = Vector3.one;
+            instantiate.ChangeLayer(LayerMask.LayerToName(parent.gameObject.layer), true);
+        }
+
+        if (typeof(T) == typeof(GameObject))
+            return instantiate as T;
+
+        return instantiate.GetComponent<T>();
+    }
+
     public static async UniTask UnloadScene(string scenePath)
     {
         AsyncOperation load = SceneManager.UnloadSceneAsync(scenePath);
@@ -337,66 +377,53 @@ public static class ResourcesManager
         SceneManager.SetActiveScene(scene);
     }
 
-    public static bool TryGetAsset<T>(string assetPath, UnityEngine.Object owner, out T asset) where T : UnityEngine.Object
-    {
 #if UNITY_EDITOR
+    private static bool TryEditorInstantiate<T>(string assetPath, Transform parent, Vector3 position, Quaternion rotation, Vector3 scale, out T obj) where T : UnityEngine.Object
+    {
+        obj = null;
+
         if (UseAssetDatabase())
         {
-            asset = Resources.Load<T>(assetPath);
+            var asset = EditorLoadAsset<GameObject>(assetPath);
             if (asset == null)
-                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
+                return false;
 
-            return true;
+            var instantiate = GameObject.Instantiate(asset, parent);
+            if (instantiate == null)
+                return false;
+
+            instantiate.transform.SetParent(parent);
+            instantiate.transform.SetPositionAndRotation(position, rotation);
+            instantiate.transform.localScale = scale;
+
+            obj = instantiate.GetComponent<T>();
+            return obj != null;
         }
-#endif
-
-        asset = null;
-
-        if (!bindingHandles.ContainsKey(assetPath))
-            return false;
-
-        asset = bindingHandles[assetPath].Result<T>();
-        return true;
-    }
-
-    public static bool TryGetPreloadAsset<T>(string assetPath, out T asset) where T : UnityEngine.Object
-    {
-#if UNITY_EDITOR
-        if (UseAssetDatabase())
-        {
-            asset = Resources.Load<T>(assetPath);
-            if (asset == null)
-                asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
-
-            return true;
-        }
-#endif
-
-        asset = null;
-
-        foreach (var preloadHandle in preloadHandles.Values)
-        {
-            if (!preloadHandle.ContainsKey(assetPath))
-                continue;
-
-            asset = preloadHandle[assetPath].Result as T;
-        }
-
-        return asset != null;
-    }
-
-#if UNITY_EDITOR
-    private static bool UseAssetDatabase()
-    {
-        var settings = UnityEditor.AddressableAssets.AddressableAssetSettingsDefaultObject.Settings;
-        if (settings == null)
-            return true;
-
-        if (settings.ActivePlayModeDataBuilderIndex == 0)
-            return true;
 
         return false;
     }
+
+    private static bool TryEditorLoad<T>(string assetPath, out T obj) where T : UnityEngine.Object
+    {
+        obj = null;
+
+        if (UseAssetDatabase())
+        {
+            var asset = EditorLoadAsset<T>(assetPath);
+            obj = asset;
+            return obj != null;
+        }
+
+        return false;
+    }
+
+    private static T EditorLoadAsset<T>(string assetPath) where T : UnityEngine.Object
+    {
+        var asset = Resources.Load<T>(assetPath);
+        if (asset == null)
+            asset = UnityEditor.AssetDatabase.LoadAssetAtPath<T>($"Assets/ResourcesAddressable/{assetPath}");
+
+        return asset;
+    }
 #endif
 }
-#endif
