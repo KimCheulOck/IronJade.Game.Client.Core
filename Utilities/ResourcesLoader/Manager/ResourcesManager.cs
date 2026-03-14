@@ -162,30 +162,33 @@ public static class ResourcesManager
         }
     }
 
-    public static async UniTask<T> InstantiateAsync<T>(string assetPath, Transform parent, Vector3 position = new Vector3(), Quaternion rotation = new Quaternion(), Vector3 scale = new Vector3()) where T : UnityEngine.Object
+    public static async UniTask<T> InstantiateAsync<T>(string assetPath, Transform parent) where T : UnityEngine.Object
+    {
+        return await InstantiateAsync<T>(assetPath, parent, Vector3.zero, Quaternion.identity, Vector3.one);
+    }
+
+    public static async UniTask<T> InstantiateAsync<T>(string assetPath, Transform parent, Vector3 position, Quaternion rotation, Vector3 scale) where T : UnityEngine.Object
     {
 #if UNITY_EDITOR
         if (TryEditorInstantiate<T>(assetPath, parent, position, rotation, scale, out T obj))
             return obj;
 #endif
 
-        var handle = Addressables.InstantiateAsync(assetPath, position, rotation, parent);
-        await handle;
-
-        GameObject instantiate = handle.Result;
+        GameObject instantiate = Resources.Load<GameObject>(assetPath);
         if (instantiate == null)
         {
-            instantiate = Resources.Load<GameObject>(assetPath);
+            var handle = Addressables.InstantiateAsync(assetPath, position, rotation, parent);
+            await handle;
+
+            instantiate = handle.Result;
             if (instantiate == null)
                 return null;
-        }
-        else
-        {
+
             bindingHandles[assetPath] = new BindingHandle(instantiate, handle);
         }
 
         instantiate.transform.SetParent(parent);
-        instantiate.transform.SetPositionAndRotation(position, rotation);
+        instantiate.transform.SetLocalPositionAndRotation(position, rotation);
         instantiate.transform.localScale = scale;
 
         return instantiate.GetComponent<T>();
@@ -247,6 +250,13 @@ public static class ResourcesManager
         if (loadingAssets.Contains(assetPath))
             return;
 
+        var asset = Resources.Load<T>(assetPath);
+        if (asset != null)
+        {
+            onComplete(true, asset);
+            return;
+        }
+
         loadingAssets.Add(assetPath);
 
         var handle = Addressables.LoadAssetAsync<T>(assetPath);
@@ -259,8 +269,7 @@ public static class ResourcesManager
             }
             else if (op.Status == AsyncOperationStatus.Failed)
             {
-                var asset = Resources.Load<T>(assetPath);
-                onComplete(asset != null, asset);
+                onComplete(false, null);
             }
 
             loadingAssets.Remove(assetPath);
@@ -420,7 +429,7 @@ public static class ResourcesManager
                 return false;
 
             instantiate.transform.SetParent(parent);
-            instantiate.transform.SetPositionAndRotation(position, rotation);
+            instantiate.transform.SetLocalPositionAndRotation(position, rotation);
             instantiate.transform.localScale = scale;
 
             obj = instantiate.GetComponent<T>();
