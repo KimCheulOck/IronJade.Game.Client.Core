@@ -206,6 +206,10 @@ public static class ResourcesManager
             return bindingHandles[assetPath].Result<T>();
         }
 
+        var asset = Resources.Load<T>(assetPath);
+        if (asset != null)
+            return asset;
+
         var handle = Addressables.LoadAssetAsync<T>(assetPath);
 
         await handle;
@@ -219,7 +223,7 @@ public static class ResourcesManager
         else
         {
             Debug.LogError($"Failed to load asset: {assetPath}");
-            return Resources.Load<T>(assetPath);
+            return null;
         }
     }
 
