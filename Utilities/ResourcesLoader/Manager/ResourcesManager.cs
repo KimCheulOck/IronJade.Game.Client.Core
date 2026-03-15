@@ -387,7 +387,7 @@ public static class ResourcesManager
         if (parent != null)
         {
             instantiate.transform.SetParent(parent);
-            instantiate.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            instantiate.transform.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
             instantiate.transform.localScale = Vector3.one;
             instantiate.ChangeLayer(LayerMask.LayerToName(parent.gameObject.layer), true);
         }
